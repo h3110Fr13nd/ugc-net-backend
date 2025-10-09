@@ -4,7 +4,33 @@ This repository contains the backend for the UGC Net project.
 
 Work for Issue #2: scaffold a FastAPI-based project structure with API versioning, SQLAlchemy, Postgres and Docker support.
 
-Quickstart (development):
+## Project Structure
+
+```
+.
+├── app/
+│   ├── api/
+│   │   └── v1/          # API version 1 endpoints
+│   │       └── routes.py
+│   ├── db/
+│   │   ├── base.py      # Database connection and session management
+│   │   └── models.py    # SQLAlchemy models
+│   └── main.py          # FastAPI app factory
+├── alembic/             # Database migrations
+│   ├── versions/
+│   └── env.py
+├── tests/               # Test suite
+│   ├── conftest.py      # Pytest fixtures
+│   ├── test_api_v1.py   # API endpoint tests
+│   └── test_database.py # Database integration tests
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt     # Runtime dependencies
+├── dev-requirements.txt # Development dependencies
+└── pytest.ini           # Pytest configuration
+```
+
+## Quickstart (development):
 
 1. Copy `.env.example` to `.env` and adjust settings if needed.
 2. Create a venv and install dependencies using `uv` (preferred):
@@ -20,17 +46,19 @@ Quickstart (development):
 	  ```
 
 	- Add runtime deps: `uv add fastapi uvicorn[standard] sqlalchemy asyncpg`
-	- Add dev deps: `uv add -d pytest pytest-asyncio httpx alembic black pytest-cov`
+	- Add dev deps: `uv add -d pytest pytest-asyncio httpx alembic black pytest-cov aiosqlite`
 
 	- Alternatively, install from requirements: `uv pip install -r requirements.txt` and `uv pip install -r dev-requirements.txt`.
 
 3. Start services with Docker Compose (recommended for parity):
 
+	```bash
 	docker-compose up --build
+	```
 
 4. The API will be available at http://localhost:8000/api/v1/health
 
-Database migrations (Alembic)
+## Database migrations (Alembic)
 
 1. Install alembic (already added to requirements):
 
@@ -46,5 +74,69 @@ Database migrations (Alembic)
 	alembic revision --autogenerate -m "initial"
 	alembic upgrade head
 	```
+
+## Testing
+
+The project uses pytest with async support for testing.
+
+### Run all tests:
+
+```bash
+pytest tests/ -v
+```
+
+### Run tests with coverage:
+
+```bash
+pytest tests/ -v --cov=app --cov-report=term-missing
+```
+
+### Run specific test file:
+
+```bash
+pytest tests/test_api_v1.py -v
+```
+
+### Test structure:
+- `tests/conftest.py` - Shared fixtures including test database and HTTP client
+- `tests/test_api_v1.py` - API endpoint tests
+- `tests/test_database.py` - Database model and integration tests
+
+Tests use an in-memory SQLite database for fast execution without requiring a Postgres instance.
+
+## Code Quality
+
+### Format code with Black:
+
+```bash
+black app/ tests/
+```
+
+### Check code formatting:
+
+```bash
+black --check app/ tests/
+```
+
+## CI/CD
+
+The project includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that:
+- Runs tests on Python 3.10, 3.11, and 3.12
+- Checks code formatting with Black
+- Generates coverage reports
+- Tests the Docker build and docker-compose setup
+
+## API Versioning
+
+The API uses URL-based versioning (e.g., `/api/v1/`, `/api/v2/`). To add a new API version:
+
+1. Create a new directory: `app/api/v2/`
+2. Add your routes in `app/api/v2/routes.py`
+3. Register the router in `app/main.py`:
+
+```python
+from app.api.v2.routes import router as v2_router
+app.include_router(v2_router, prefix="/api/v2")
+```
 
 
