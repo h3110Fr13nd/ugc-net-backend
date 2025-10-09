@@ -8,3 +8,9 @@ dependencies = []
 
 [tool.poetry.dev-dependencies]
 # Runtime dependencies are tracked in requirements.txt for Docker-based development.
+
+[tool.tasks]
+# Informal task definitions (referenced by Makefile). These are for discoverability only.
+compose_up = "docker-compose -f docker-compose.yml up -d --build"
+compose_down = "docker-compose -f docker-compose.yml down -v"
+migrate = "make migrate"

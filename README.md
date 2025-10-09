@@ -139,4 +139,22 @@ from app.api.v2.routes import router as v2_router
 app.include_router(v2_router, prefix="/api/v2")
 ```
 
+## Local DB and Migrations
+
+This project includes a Docker Compose configuration for a local Postgres DB and helper targets to run migrations.
+
+- Start services (DB + web):
+
+  make up
+
+- Run migrations once the DB is available:
+
+  make migrate
+
+- Recreate the DB and run migrations:
+
+  make recreate
+
+The Makefile uses environment variables to configure the target DB; see the file for details. Scripts live in `scripts/` and are safe to run from a POSIX shell.
+
 
