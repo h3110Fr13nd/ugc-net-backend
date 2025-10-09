@@ -5,3 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+
+[tool.poetry.dev-dependencies]
+# Runtime dependencies are tracked in requirements.txt for Docker-based development.
