@@ -73,4 +73,5 @@ Keep guidance short, concrete, and tied to the `backend/` microservice in this r
   - Follow established async SQLAlchemy usage in `app/db/base.py` (use `AsyncSessionLocal` and `get_session`).
     - Prefer async-first patterns and libraries: use SQLAlchemy 2.x async features and `asyncpg` for Postgres, and prefer async third-party libraries when available.
 
+NOTE: DO NOT CREATE SUMMARY FILES AFTER FINISHING A TASK, UNLESS SPECIFICALLY INSTRUCTED. AND ONLY ADD SUMMARY FILES IN docs/copilot DIRECTORY.
 Please tell me if you want a PR template, initial Alembic setup, or a basic pytest for the health endpoint added next.

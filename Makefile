@@ -10,9 +10,12 @@
 COMPOSE_FILE=docker-compose.yml
 # Prefer classic docker-compose if available, else use `docker compose`
 DOCKER_COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; else echo "docker compose"; fi)
-DB_HOST?=127.0.0.1
+DB_HOST?=localhost
+DB_HOST_CONTAINER?=db
 DB_PORT?=5432
 DB_URL?=postgresql+asyncpg://postgres:postgres@$(DB_HOST):$(DB_PORT)/ugc
+# Use service name 'db' when running inside containers
+DB_URL_CONTAINER?=postgresql+asyncpg://postgres:postgres@$(DB_HOST_CONTAINER):$(DB_PORT)/ugc
 
 .PHONY: up down migrate recreate logs shell wait-db
 
@@ -30,7 +33,7 @@ migrate: wait-db
 	@echo "Running alembic migrations against $(DB_URL) inside web container"
 	@echo "Building web image to ensure migrations and code are up-to-date"
 	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) build web
-	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) run --rm --no-deps -e DATABASE_URL=$(DB_URL) web bash -c "alembic upgrade head"
+	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) run --rm --no-deps -e DATABASE_URL=$(DB_URL_CONTAINER) web bash -c "alembic upgrade head"
 
 # fallback: run migrations on host (useful if you have alembic installed locally)
 .PHONY: migrate-host
@@ -41,7 +44,7 @@ migrate-host: wait-db
 recreate: down up migrate
 
 logs:
-	docker-compose -f $(COMPOSE_FILE) logs -f
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) logs -f
 
 shell:
-	docker-compose -f $(COMPOSE_FILE) exec web /bin/bash
+	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) exec web /bin/bash

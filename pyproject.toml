@@ -4,7 +4,20 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "aiofiles>=23.0",
+    "alembic>=1.17.1",
+    "asyncpg>=0.27",
+    "bcrypt>=4.0",
+    "email-validator>=2.0",
+    "fastapi>=0.95",
+    "httpx>=0.24",
+    "psycopg2-binary>=2.9",
+    "pyjwt>=2.8",
+    "python-multipart>=0.0.6",
+    "sqlalchemy>=1.4",
+    "uvicorn[standard]>=0.22",
+]
 
 [tool.poetry.dev-dependencies]
 # Runtime dependencies are tracked in requirements.txt for Docker-based development.

@@ -30,12 +30,12 @@ class User(Base):
     preferred_username = Column(String, nullable=True)
     display_name = Column(String, nullable=True)
     locale = Column(String, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_at = Column(DateTime(timezone=True), default=now)
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
-    roles = relationship("UserRole", back_populates="user")
+    roles = relationship("UserRole", foreign_keys="UserRole.user_id", back_populates="user")
 
 
 class Role(Base):
@@ -43,7 +43,7 @@ class Role(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
     name = Column(String, unique=True, nullable=False)
     description = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class Permission(Base):
@@ -74,7 +74,7 @@ class OAuthProvider(Base):
     __tablename__ = "oauth_providers"
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
     provider_name = Column(String, unique=True, nullable=False)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class UserOAuthAccount(Base):
@@ -99,7 +99,7 @@ class JWTRevocation(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     reason = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class RefreshToken(Base):
@@ -112,7 +112,7 @@ class RefreshToken(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     rotate_on_use = Column(Boolean, default=True)
 
 
@@ -127,7 +127,7 @@ class Media(Base):
     size_bytes = Column(Integer, nullable=True)
     checksum = Column(String, nullable=True, index=True)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_at = Column(DateTime(timezone=True), default=now)
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
 
@@ -137,7 +137,7 @@ class Quiz(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now)
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
@@ -165,10 +165,13 @@ class Question(Base):
     scoring = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     difficulty = Column(Integer, nullable=True)
     estimated_time_seconds = Column(Integer, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now)
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
+    
+    parts = relationship("QuestionPart", back_populates="question", order_by="QuestionPart.index", cascade="all, delete-orphan")
+    options = relationship("Option", back_populates="question", order_by="Option.index", cascade="all, delete-orphan")
 
 
 class QuestionVersion(Base):
@@ -190,7 +193,10 @@ class QuestionPart(Base):
     content = Column(Text, nullable=True)
     content_json = Column(JSONB, nullable=True)
     media_id = Column(UUID(as_uuid=True), ForeignKey("media.id"), nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    
+    question = relationship("Question", back_populates="parts")
+    media = relationship("Media")
 
 
 class Option(Base):
@@ -201,9 +207,12 @@ class Option(Base):
     index = Column(Integer, nullable=True)
     is_correct = Column(Boolean, default=False)
     weight = Column(Numeric, default=1)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_at = Column(DateTime(timezone=True), default=now)
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
+    
+    question = relationship("Question", back_populates="options")
+    parts = relationship("OptionPart", back_populates="option", order_by="OptionPart.index", cascade="all, delete-orphan")
 
 
 class OptionPart(Base):
@@ -214,6 +223,9 @@ class OptionPart(Base):
     part_type = Column(String, nullable=False)
     content = Column(Text, nullable=True)
     media_id = Column(UUID(as_uuid=True), ForeignKey("media.id"), nullable=True)
+    
+    option = relationship("Option", back_populates="parts")
+    media = relationship("Media")
 
 
 class QuizAttempt(Base):
@@ -227,7 +239,7 @@ class QuizAttempt(Base):
     score = Column(Numeric, nullable=True)
     max_score = Column(Numeric, nullable=True)
     status = Column(String, nullable=False, default="in_progress")
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class QuestionAttempt(Base):
@@ -241,7 +253,7 @@ class QuestionAttempt(Base):
     scored_at = Column(DateTime(timezone=True), nullable=True)
     score = Column(Numeric, nullable=True)
     grading = Column(JSONB, nullable=True)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class QuestionAttemptPart(Base):
@@ -261,7 +273,7 @@ class Subject(Base):
     __tablename__ = "subjects"
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
     name = Column(String, nullable=False)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class Chapter(Base):
@@ -269,7 +281,7 @@ class Chapter(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
     subject_id = Column(UUID(as_uuid=True), ForeignKey("subjects.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class Topic(Base):
@@ -278,7 +290,7 @@ class Topic(Base):
     name = Column(String, nullable=False)
     parent_id = Column(UUID(as_uuid=True), ForeignKey("topics.id"), nullable=True)
     path = Column(String, nullable=True)  # recommend using ltree in DB
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_at = Column(DateTime(timezone=True), default=now)
 
 
@@ -302,7 +314,7 @@ class TopicAssociation(Base):
     from_topic_id = Column(UUID(as_uuid=True), ForeignKey("topics.id"), nullable=False)
     to_topic_id = Column(UUID(as_uuid=True), ForeignKey("topics.id"), nullable=False)
     association_type = Column(String, nullable=False)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
 
 class EntityRelationship(Base):
@@ -313,7 +325,7 @@ class EntityRelationship(Base):
     target_type = Column(String, nullable=False)
     target_id = Column(UUID(as_uuid=True), nullable=False)
     relation_type = Column(String, nullable=False)
-    metadata = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now)
 

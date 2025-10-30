@@ -69,5 +69,13 @@ alembic/versions/__pycache__/
 # Docker
 .dockerignore
 
+# OAuth credentials
+client_secret*.json
+client_secret_*.json
+
 # Misc
 *.log
+
+
+# Local Storage files
+uploads/

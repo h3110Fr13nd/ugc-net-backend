@@ -1,0 +1,348 @@
+openapi: 3.1.0
+info:
+  title: UGC Net App API (Draft)
+  version: '0.1.0'
+  description: |
+    Compact OpenAPI skeleton covering the main endpoints referenced in the pages docs. Use this
+    as a starting point to generate server stubs, client SDKs, or API docs.
+servers:
+  - url: /api/v1
+
+paths:
+  /auth/login:
+    post:
+      summary: User login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /sessions:
+    get:
+      summary: List active sessions for current user
+      responses:
+        '200':
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+
+  /sessions/{id}/revoke:
+    post:
+      summary: Revoke a refresh session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Revoked
+
+  /quizzes:
+    get:
+      summary: List quizzes
+      responses:
+        '200':
+          description: Quiz list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quiz'
+    post:
+      summary: Create quiz
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizCreate'
+      responses:
+        '201':
+          description: Created
+
+  /quizzes/{id}:
+    get:
+      summary: Get quiz
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Quiz
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+
+  /quizzes/{id}/publish:
+    post:
+      summary: Publish quiz (snapshot)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Published
+
+  /quiz_attempts:
+    post:
+      summary: Start a quiz attempt
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizAttemptStart'
+      responses:
+        '201':
+          description: Attempt created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizAttempt'
+
+  /quiz_attempts/{id}/submit:
+    patch:
+      summary: Submit an attempt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Submitted
+
+  /questions:
+    post:
+      summary: Create question
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionCreate'
+      responses:
+        '201':
+          description: Created
+
+  /questions/{id}:
+    get:
+      summary: Get question
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Question
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+
+  /media:
+    post:
+      summary: Upload media (multipart or presigned flow)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Media created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Media'
+
+  /topics:
+    get:
+      summary: List topics
+      responses:
+        '200':
+          description: Topics
+
+  /entity_relationships:
+    post:
+      summary: Create entity relationship
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityRelationshipCreate'
+      responses:
+        '201':
+          description: Created
+
+  /search:
+    get:
+      summary: Search across resources
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Search results
+
+  /admin/users:
+    get:
+      summary: Admin list users
+      responses:
+        '200':
+          description: Users list
+
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        display_name:
+          type: string
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        device_info:
+          type: string
+        last_used_at:
+          type: string
+          format: date-time
+    Quiz:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+    QuizCreate:
+      type: object
+    QuizAttemptStart:
+      type: object
+      properties:
+        quiz_id:
+          type: string
+        user_id:
+          type: string
+    QuizAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+        quiz_id:
+          type: string
+        status:
+          type: string
+    Question:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        answer_type:
+          type: string
+    QuestionCreate:
+      type: object
+    Media:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        mime_type:
+          type: string
+    EntityRelationshipCreate:
+      type: object
+      properties:
+        source_type:
+          type: string
+        source_id:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        relation_type:
+          type: string

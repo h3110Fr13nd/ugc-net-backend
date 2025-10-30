@@ -4,3 +4,9 @@ SQLAlchemy>=1.4
 asyncpg>=0.27
 alembic
 psycopg2-binary>=2.9
+httpx>=0.24
+PyJWT>=2.8
+bcrypt>=4.0
+email-validator>=2.0
+aiofiles>=23.0
+python-multipart>=0.0.6
