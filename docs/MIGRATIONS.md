@@ -32,7 +32,7 @@ source .venv/bin/activate
 export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/ugc"
 
 # Auto-generate based on model changes
-alembic revision --autogenerate -m "add new_field to users"
+alembic revision --autogenerate -m "add new_field to users" --rev-id 0003_add_new_field_to_users
 ```
 
 This creates a migration file like `alembic/versions/0003_add_new_field_to_users.py`

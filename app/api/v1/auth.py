@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response, Cookie
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
@@ -12,7 +12,10 @@ from typing import Optional
 import glob
 
 from ...db.base import get_session
-from ...db.models import User
+from ...db.models import User, RefreshToken
+from app.core.security import create_refresh_token, hash_token, REFRESH_TOKEN_SECONDS
+from sqlalchemy import update
+from datetime import timedelta, datetime
 
 router = APIRouter()
 
@@ -73,6 +76,7 @@ def verify_password(password: str, hash_: str) -> bool:
 
 def create_app_token(user_id: str, email: str, name: Optional[str] = None) -> str:
     """Create application JWT token."""
+    # Include standard claims
     payload = {
         "sub": user_id,
         "email": email,
@@ -99,22 +103,29 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_sess
         password_hash=password_hash,
         password_algo="bcrypt",
         display_name=payload.name or payload.email,
+        meta_data={},
     )
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
     
-    # Generate token
+    # Generate access token
     app_token = create_app_token(str(new_user.id), new_user.email, new_user.display_name)
-    
-    return {
+
+    # Generate refresh token and persist hash
+    refresh_token, refresh_expires = create_refresh_token()
+    refresh_hash = hash_token(refresh_token)
+    rt = RefreshToken(user_id=new_user.id, refresh_token_hash=refresh_hash, expires_at=refresh_expires, meta_data={})
+    db.add(rt)
+    await db.commit()
+
+    resp = JSONResponse({
         "access_token": app_token,
-        "user": {
-            "id": str(new_user.id),
-            "email": new_user.email,
-            "name": new_user.display_name,
-        }
-    }
+        "user": {"id": str(new_user.id), "email": new_user.email, "name": new_user.display_name},
+    })
+    # Set httpOnly secure cookie for refresh token (dev: secure=False if not https)
+    resp.set_cookie("refresh_token", refresh_token, httponly=True, secure=os.getenv("ENV") == "production", samesite="lax", max_age=REFRESH_TOKEN_SECONDS)
+    return resp
 
 
 @router.post("/login")
@@ -131,17 +142,22 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_session)):
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Generate token
+    # Generate access token
     app_token = create_app_token(str(user.id), user.email, user.display_name)
-    
-    return {
+
+    # Create refresh token
+    refresh_token, refresh_expires = create_refresh_token()
+    refresh_hash = hash_token(refresh_token)
+    rt = RefreshToken(user_id=user.id, refresh_token_hash=refresh_hash, expires_at=refresh_expires, meta_data={})
+    db.add(rt)
+    await db.commit()
+
+    resp = JSONResponse({
         "access_token": app_token,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "name": user.display_name,
-        }
-    }
+        "user": {"id": str(user.id), "email": user.email, "name": user.display_name},
+    })
+    resp.set_cookie("refresh_token", refresh_token, httponly=True, secure=os.getenv("ENV") == "production", samesite="lax", max_age=REFRESH_TOKEN_SECONDS)
+    return resp
 
 
 @router.get("/google/url")
@@ -269,6 +285,7 @@ async def verify_google_token(payload: GoogleTokenVerifyRequest, db: AsyncSessio
             email=email,
             google_id=google_sub,
             display_name=name or email,
+            meta_data={},
             profile_picture_url=picture,
             email_verified=email_verified == "true" or email_verified is True,
         )
@@ -286,12 +303,71 @@ async def verify_google_token(payload: GoogleTokenVerifyRequest, db: AsyncSessio
     # Generate application token
     app_token = create_app_token(str(user.id), user.email, user.display_name)
 
-    return {
+    # Create refresh token and persist
+    refresh_token, refresh_expires = create_refresh_token()
+    refresh_hash = hash_token(refresh_token)
+    rt = RefreshToken(user_id=user.id, refresh_token_hash=refresh_hash, expires_at=refresh_expires, meta_data={})
+    db.add(rt)
+    await db.commit()
+
+    resp = JSONResponse({
         "access_token": app_token,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "name": user.display_name,
-            "picture": user.profile_picture_url,
-        }
-    }
+        "user": {"id": str(user.id), "email": user.email, "name": user.display_name, "picture": user.profile_picture_url},
+    })
+    resp.set_cookie("refresh_token", refresh_token, httponly=True, secure=os.getenv("ENV") == "production", samesite="lax", max_age=REFRESH_TOKEN_SECONDS)
+    return resp
+
+
+@router.post("/refresh")
+async def refresh(response: Response, refresh_token: str | None = Cookie(None), db: AsyncSession = Depends(get_session)):
+    """Rotate and return a new access token. Refresh token is read from httpOnly cookie."""
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+
+    hash_ = hash_token(refresh_token)
+    stmt = select(RefreshToken).where(RefreshToken.refresh_token_hash == hash_)
+    res = await db.execute(stmt)
+    rt = res.scalar_one_or_none()
+    if not rt:
+        raise HTTPException(status_code=401, detail="Refresh token not found")
+    if rt.revoked_at or (rt.expires_at and rt.expires_at < datetime.utcnow()):
+        raise HTTPException(status_code=401, detail="Refresh token revoked or expired")
+
+    # Load user
+    user = await db.get(User, rt.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    # Rotate refresh token if configured
+    new_refresh, new_expires = create_refresh_token()
+    new_hash = hash_token(new_refresh)
+    # Mark old token revoked and insert new one
+    rt.revoked_at = datetime.utcnow()
+    new_rt = RefreshToken(user_id=user.id, refresh_token_hash=new_hash, expires_at=new_expires, meta_data={})
+    db.add(new_rt)
+    await db.commit()
+
+    # Build new access token
+    app_token = create_app_token(str(user.id), user.email, user.display_name)
+
+    resp = JSONResponse({"access_token": app_token})
+    resp.set_cookie("refresh_token", new_refresh, httponly=True, secure=os.getenv("ENV") == "production", samesite="lax", max_age=REFRESH_TOKEN_SECONDS)
+    return resp
+
+
+@router.post("/logout")
+async def logout(response: Response, refresh_token: str | None = Cookie(None), db: AsyncSession = Depends(get_session)):
+    """Revoke refresh token and clear cookie."""
+    if refresh_token:
+        hash_ = hash_token(refresh_token)
+        stmt = select(RefreshToken).where(RefreshToken.refresh_token_hash == hash_)
+        res = await db.execute(stmt)
+        rt = res.scalar_one_or_none()
+        if rt:
+            rt.revoked_at = datetime.utcnow()
+            await db.commit()
+
+    # Clear cookie
+    response = JSONResponse({"status": "ok"})
+    response.delete_cookie("refresh_token")
+    return response

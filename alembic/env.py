@@ -1,4 +1,5 @@
 import os
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -14,12 +15,25 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Ensure project package is importable when alembic runs from the backend/ dir
+# Insert the backend project root (parent of alembic/) into sys.path.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # add your model's MetaData object here for 'autogenerate' support
-# from myapp import mymodel
+# Import the application's Base so autogenerate has access to MetaData.
 try:
+    # Prefer explicit import so failures are visible during development
     from app.db.models import Base
-except Exception:  # pragma: no cover - allow import errors during tooling
+except Exception as exc:  # pragma: no cover - allow import errors during tooling
+    # If import fails, surface a helpful message and set Base to None so alembic gives a clear error
+    # (this will still cause autogenerate to fail but with visible exception info earlier in logs)
     Base = None
+    # Optionally log to stderr for visibility during CI or local runs
+    import logging
+
+    logging.getLogger("alembic.env").exception("Failed to import app.db.models.Base: %s", exc)
 
 target_metadata = getattr(Base, "metadata", None)
 

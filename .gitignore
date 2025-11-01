@@ -79,3 +79,4 @@ client_secret_*.json
 
 # Local Storage files
 uploads/
+logs/

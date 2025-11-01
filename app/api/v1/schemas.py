@@ -234,3 +234,33 @@ class QuizAttemptResponse(BaseModel):
     meta_data: dict
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Taxonomy schemas
+class TaxonomyBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    node_type: str = "topic"
+    parent_id: Optional[UUID] = None
+    meta_data: dict = Field(default_factory=dict)
+
+
+class TaxonomyCreate(TaxonomyBase):
+    pass
+
+
+class TaxonomyResponse(TaxonomyBase):
+    id: UUID
+    path: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaxonomyTreeResponse(TaxonomyResponse):
+    children: List["TaxonomyTreeResponse"] = Field(default_factory=list)
+
+
+# Forward ref resolution
+TaxonomyTreeResponse.model_rebuild()
