@@ -150,8 +150,8 @@ async def client(test_session: AsyncSession) -> AsyncGenerator[AsyncClient, None
 
     # assign both admin and author roles to the test user
     user_roles = [
-        UserRole(user_id=admin_user.id, role_id=admin_role.id, assigned_at=datetime.datetime.utcnow()),
-        UserRole(user_id=admin_user.id, role_id=author_role.id, assigned_at=datetime.datetime.utcnow()),
+        UserRole(user_id=admin_user.id, role_id=admin_role.id, assigned_at=datetime.datetime.now(datetime.timezone.utc)),
+        UserRole(user_id=admin_user.id, role_id=author_role.id, assigned_at=datetime.datetime.now(datetime.timezone.utc)),
     ]
     test_session.add_all(user_roles)
     await test_session.commit()
