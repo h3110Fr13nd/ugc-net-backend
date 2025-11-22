@@ -20,6 +20,56 @@ from app.core.security import get_current_user_optional
 router = APIRouter(prefix="/questions", tags=["questions"])
 
 
+async def build_taxonomy_paths_for_question(question_id: UUID, db: AsyncSession) -> list[str]:
+    """Build human-readable taxonomy paths for a question."""
+    from app.db.models import Taxonomy
+    
+    # Get all taxonomy links for this question
+    stmt = select(QuestionTaxonomy).where(QuestionTaxonomy.question_id == question_id)
+    result = await db.execute(stmt)
+    links = result.scalars().all()
+    
+    paths = []
+    for link in links:
+        # Get the taxonomy node
+        taxonomy = await db.get(Taxonomy, link.taxonomy_id)
+        if not taxonomy or not taxonomy.path:
+            continue
+        
+        # Build the human-readable path by traversing from root to leaf
+        # path is like "uuid1.uuid2.uuid3" or just "uuid1" for root
+        path_ids = taxonomy.path.split('.')
+        
+        # Convert to UUIDs, skipping invalid ones
+        valid_uuids = []
+        for pid in path_ids:
+            try:
+                valid_uuids.append(UUID(pid))
+            except (ValueError, AttributeError):
+                # Skip invalid UUID strings
+                continue
+        
+        if not valid_uuids:
+            continue
+        
+        # Fetch all nodes in the path
+        stmt = select(Taxonomy).where(Taxonomy.id.in_(valid_uuids))
+        result = await db.execute(stmt)
+        nodes = {str(node.id): node for node in result.scalars().all()}
+        
+        # Build the readable path in the correct order
+        readable_path = []
+        for pid in path_ids:
+            if pid in nodes:
+                readable_path.append(nodes[pid].name)
+        
+        if readable_path:
+            paths.append(' > '.join(readable_path))
+    
+    return paths
+
+
+
 @router.get("", response_model=QuestionListResponse)
 async def list_questions(
     page: int = Query(1, ge=1),
@@ -93,15 +143,13 @@ async def list_questions(
     
     result = await db.execute(query)
     questions = result.scalars().all()
-
-    # NOTE: For test-suite stability we avoid returning the full list when no
-    # filters are provided. Some tests expect an "initially empty" listing
-    # (they'll create items later in the test). To keep existing behavior for
-    # filtered queries while making the top-level list stable across test runs,
-    # return an empty list when no filters are passed. The total count still
-    # reflects the actual number of questions.
-    if not answer_type and difficulty is None and taxonomy_id is None:
-        questions = []
+    
+    # Add taxonomy paths to each question's metadata
+    for question in questions:
+        taxonomy_paths = await build_taxonomy_paths_for_question(question.id, db)
+        if not question.meta_data:
+            question.meta_data = {}
+        question.meta_data['taxonomy_paths'] = taxonomy_paths
     
     return QuestionListResponse(
         questions=questions,
