@@ -19,6 +19,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/ugc
     ports:
       - "8000:8000"
+    volumes:
+      - ./:/app
 
   # Optional: Adminer for database management
   adminer:
@@ -37,7 +39,9 @@ services:
       - "5051:443"
     depends_on:
       - db
-  
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+
   # prisma:
   #   image: prismagraphql/prisma:1.34
   #   restart: always
@@ -101,3 +105,4 @@ services:
 volumes:
   pgdata:
   grafana-data:
+  pgadmin-data:

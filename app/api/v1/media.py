@@ -13,6 +13,7 @@ import mimetypes
 from ...db.base import get_session
 from ...db.models import Media
 from .schemas import MediaResponse
+from app.core.security import get_current_user_optional
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -90,6 +91,7 @@ def validate_file_type(content_type: str, allowed_types: set) -> bool:
 async def upload_media(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """
     Upload a media file (image, video, audio, or document).
@@ -159,6 +161,7 @@ async def upload_media(
 async def upload_image(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """Upload an image file specifically."""
     # Detect MIME type from filename
@@ -177,6 +180,7 @@ async def upload_image(
 async def get_media(
     media_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """Get media metadata by ID."""
     result = await db.execute(select(Media).where(Media.id == media_id))
@@ -192,6 +196,7 @@ async def get_media(
 async def delete_media(
     media_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """Delete a media file and its record."""
     result = await db.execute(select(Media).where(Media.id == media_id))
@@ -217,6 +222,7 @@ async def list_media(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """List all media files."""
     result = await db.execute(

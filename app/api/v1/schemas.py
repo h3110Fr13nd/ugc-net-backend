@@ -120,6 +120,7 @@ class QuestionCreate(QuestionBase):
     parts: List[QuestionPartCreate] = Field(default_factory=list)
     options: List[OptionCreate] = Field(default_factory=list)
     created_by: Optional[UUID] = None
+    taxonomy_ids: Optional[List[UUID]] = None
 
 
 class QuestionUpdate(BaseModel):

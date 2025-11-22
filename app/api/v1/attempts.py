@@ -54,14 +54,17 @@ from app.db.models import (
     Taxonomy,
     UserTaxonomyStats,
     QuizVersion,
+    Role,
+    UserRole,
 )
 from .schemas import QuizAttemptCreate, QuizAttemptResponse, QuestionAttemptCreate, QuestionAttemptResponse
+from app.core.security import get_current_user_optional
 
 router = APIRouter(tags=["attempts"])
 
 
 @router.post("/quizzes/{quiz_id}/start", response_model=QuizAttemptResponse, status_code=201)
-async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Optional[UUID] = None, db: AsyncSession = Depends(get_session)):
+async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Optional[UUID] = None, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     """Start a quiz attempt.
 
     If `version_id` is provided, use that QuizVersion. Otherwise resolve the latest published QuizVersion for the quiz.
@@ -82,7 +85,9 @@ async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Opti
         chosen_version = qv_res.scalars().first()
 
     # If quiz is published but has no versions, allow starting but warn (chosen_version None)
-    qa = QuizAttempt(quiz_id=quiz_id, quiz_version_id=(chosen_version.id if chosen_version else None), user_id=payload.user_id, meta_data=payload.meta_data)
+    # If authenticated, tie the attempt to the authenticated user; otherwise fall back to payload.user_id
+    user_id = current_user.id if current_user else payload.user_id
+    qa = QuizAttempt(quiz_id=quiz_id, quiz_version_id=(chosen_version.id if chosen_version else None), user_id=user_id, meta_data=payload.meta_data)
     db.add(qa)
     await db.commit()
     await db.refresh(qa)
@@ -90,11 +95,25 @@ async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Opti
 
 
 @router.post("/quiz-attempts/{attempt_id}/submit-answer", response_model=QuestionAttemptResponse)
-async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: AsyncSession = Depends(get_session)):
+async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     # Fetch quiz attempt
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
         raise HTTPException(status_code=404, detail="QuizAttempt not found")
+
+    # If an authenticated user is present, enforce owner or admin access; otherwise keep legacy behavior
+    if current_user:
+        if qa.user_id and str(qa.user_id) != str(current_user.id):
+            try:
+                stmt = select(Role).join(UserRole, Role.id == UserRole.role_id).where(UserRole.user_id == current_user.id, Role.name == 'admin')
+                res = await db.execute(stmt)
+                admin_role = res.scalar_one_or_none()
+                if not admin_role:
+                    raise HTTPException(status_code=403, detail="forbidden")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="forbidden")
 
     # Fetch question and options
     question = await db.get(Question, payload.question_id)
@@ -346,11 +365,25 @@ async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: As
 
 
 @router.post("/quiz-attempts/{attempt_id}/finish")
-async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session)):
+async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     """Mark a quiz attempt as finished, compute final totals and mark completed."""
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
         raise HTTPException(status_code=404, detail="QuizAttempt not found")
+
+    # If an authenticated user is present, enforce owner or admin access; otherwise keep legacy behavior
+    if current_user:
+        if qa.user_id and str(qa.user_id) != str(current_user.id):
+            try:
+                stmt = select(Role).join(UserRole, Role.id == UserRole.role_id).where(UserRole.user_id == current_user.id, Role.name == 'admin')
+                res = await db.execute(stmt)
+                admin_role = res.scalar_one_or_none()
+                if not admin_role:
+                    raise HTTPException(status_code=403, detail="forbidden")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="forbidden")
 
     # set submitted_at, compute duration if possible
     from datetime import datetime
@@ -378,11 +411,25 @@ async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session))
 
 
 @router.get("/quiz-attempts/{attempt_id}/results")
-async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_session)):
+async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     """Return the full graded review of a completed quiz attempt."""
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
         raise HTTPException(status_code=404, detail="QuizAttempt not found")
+
+    # If an authenticated user is present, enforce owner or admin access; otherwise keep legacy behavior
+    if current_user:
+        if qa.user_id and str(qa.user_id) != str(current_user.id):
+            try:
+                stmt = select(Role).join(UserRole, Role.id == UserRole.role_id).where(UserRole.user_id == current_user.id, Role.name == 'admin')
+                res = await db.execute(stmt)
+                admin_role = res.scalar_one_or_none()
+                if not admin_role:
+                    raise HTTPException(status_code=403, detail="forbidden")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="forbidden")
 
     # Load question attempts and parts
     res = await db.execute(select(QuestionAttempt).where(QuestionAttempt.quiz_attempt_id == qa.id))

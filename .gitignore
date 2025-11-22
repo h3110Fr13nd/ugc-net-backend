@@ -80,3 +80,25 @@ client_secret_*.json
 # Local Storage files
 uploads/
 logs/
+
+# Data files
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+classified_questions.json
+extracted_questions.json
+missing_taxonomy_paths.json
+taxonomy.json
+year_mapping.json
+
+# Extracted media
+extracted_media/
+
+# Markdown documentation (generated)
+syllabus_compact.md
+syllabus_indented.md
+
+# Coverage reports
+.coverage
+htmlcov/

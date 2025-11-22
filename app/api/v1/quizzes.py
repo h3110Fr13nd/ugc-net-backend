@@ -9,6 +9,7 @@ from app.db.base import get_session
 from app.db.models import Quiz, QuizVersion, Question, QuestionPart, Option, OptionPart, User, QuestionVersion
 from .schemas import QuizCreate, QuizResponse
 from app.core.security import require_role
+from app.core.security import get_current_user_optional
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
@@ -29,19 +30,21 @@ async def create_quiz(payload: QuizCreate, current_user = Depends(require_role("
 
 
 @router.get("", response_model=List[QuizResponse])
-async def list_quizzes(db: AsyncSession = Depends(get_session)):
+async def list_quizzes(db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+    """List quizzes; current_user injected if authenticated (optional)."""
     result = await db.execute(select(Quiz).order_by(Quiz.created_at.desc()))
     return result.scalars().all()
 
 
 @router.get("/published", response_model=List[QuizResponse])
-async def list_published_quizzes(db: AsyncSession = Depends(get_session)):
+async def list_published_quizzes(db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+    """List published quizzes; current_user injected if authenticated (optional)."""
     result = await db.execute(select(Quiz).where(Quiz.status == "published").order_by(Quiz.published_at.desc()))
     return result.scalars().all()
 
 
 @router.get("/{quiz_id}", response_model=QuizResponse)
-async def get_quiz(quiz_id: UUID, db: AsyncSession = Depends(get_session)):
+async def get_quiz(quiz_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     q = await db.get(Quiz, quiz_id)
     if not q:
         raise HTTPException(status_code=404, detail="Quiz not found")
@@ -73,7 +76,7 @@ async def add_question_to_quiz(quiz_id: UUID, question_id: UUID, index: Optional
 
 
 @router.get("/{quiz_id}/questions")
-async def list_quiz_questions(quiz_id: UUID, db: AsyncSession = Depends(get_session)):
+async def list_quiz_questions(quiz_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     from app.db.models import QuizQuestion, Question
 
     quiz = await db.get(Quiz, quiz_id)
@@ -188,6 +191,6 @@ async def publish_quiz(quiz_id: UUID, question_ids: Optional[List[UUID]] = None,
 
 
 @router.get("/{quiz_id}/versions")
-async def list_quiz_versions(quiz_id: UUID, db: AsyncSession = Depends(get_session)):
+async def list_quiz_versions(quiz_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     result = await db.execute(select(QuizVersion).where(QuizVersion.quiz_id == quiz_id).order_by(QuizVersion.version_number.desc()))
     return result.scalars().all()

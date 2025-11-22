@@ -12,6 +12,7 @@ from .schemas import (
     TaxonomyTreeResponse,
 )
 from app.core.security import require_role
+from app.core.security import get_current_user_optional
 
 router = APIRouter(prefix="/taxonomy", tags=["taxonomy"])
 
@@ -75,7 +76,7 @@ def build_tree(nodes: List[Taxonomy]) -> List[Dict]:
 
 
 @router.get("/tree", response_model=List[TaxonomyTreeResponse])
-async def get_taxonomy_tree(db: AsyncSession = Depends(get_session)):
+async def get_taxonomy_tree(db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     result = await db.execute(select(Taxonomy).order_by(Taxonomy.name))
     nodes = result.scalars().all()
     tree = build_tree(nodes)
@@ -83,7 +84,7 @@ async def get_taxonomy_tree(db: AsyncSession = Depends(get_session)):
 
 
 @router.get("/{node_id}", response_model=TaxonomyResponse)
-async def get_taxonomy_node(node_id: UUID, db: AsyncSession = Depends(get_session)):
+async def get_taxonomy_node(node_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     node = await db.get(Taxonomy, node_id)
     if not node:
         raise HTTPException(status_code=404, detail="Taxonomy node not found")

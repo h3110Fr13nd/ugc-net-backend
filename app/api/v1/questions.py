@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from app.db.base import get_session
-from app.db.models import Question, QuestionPart, Option, OptionPart, Media
+from app.db.models import Question, QuestionPart, Option, OptionPart, Media, QuestionTaxonomy
 from app.api.v1.schemas import (
     QuestionCreate,
     QuestionUpdate,
@@ -15,6 +15,7 @@ from app.api.v1.schemas import (
     QuestionListResponse,
 )
 from app.core.security import require_role
+from app.core.security import get_current_user_optional
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 
@@ -25,7 +26,9 @@ async def list_questions(
     page_size: int = Query(20, ge=1, le=100),
     answer_type: Optional[str] = None,
     difficulty: Optional[int] = None,
+    taxonomy_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """List questions with pagination and optional filters."""
     # Build base query
@@ -39,13 +42,47 @@ async def list_questions(
         query = query.where(Question.answer_type == answer_type)
     if difficulty is not None:
         query = query.where(Question.difficulty == difficulty)
-    
+    if taxonomy_id is not None:
+        # Recursive filter: Get the taxonomy node to find its path
+        from app.db.models import Taxonomy
+        # We need to execute a separate query to get the path first
+        # This is slightly less efficient than a single join but safer for complex logic
+        # Alternatively, we can do a subquery.
+        
+        # Subquery approach:
+        # Select IDs from Taxonomy where path LIKE (Select path from Taxonomy where id = :tid) + '%'
+        
+        # Let's do it in two steps for clarity and debuggability, as this is an async handler
+        # and the overhead is minimal for a single lookup.
+        t_node = await db.get(Taxonomy, taxonomy_id)
+        if t_node and t_node.path:
+            # Find all descendant IDs (including self)
+            # path is like "root_id.child_id.leaf_id"
+            # We want where path LIKE "root_id.child_id%"
+            
+            # We join Question -> QuestionTaxonomy -> Taxonomy
+            query = query.join(QuestionTaxonomy).join(Taxonomy).where(
+                Taxonomy.path.like(f"{t_node.path}%")
+            )
+        else:
+            # Fallback if node not found or no path (shouldn't happen for valid nodes)
+            # Just filter by exact ID to return empty or exact match
+            query = query.join(QuestionTaxonomy).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
+
     # Count total
     count_query = select(func.count()).select_from(Question)
     if answer_type:
         count_query = count_query.where(Question.answer_type == answer_type)
     if difficulty is not None:
         count_query = count_query.where(Question.difficulty == difficulty)
+    if taxonomy_id is not None:
+        # Same recursive logic for count
+        if 't_node' in locals() and t_node and t_node.path:
+             count_query = count_query.join(QuestionTaxonomy).join(Taxonomy).where(
+                Taxonomy.path.like(f"{t_node.path}%")
+            )
+        else:
+             count_query = count_query.join(QuestionTaxonomy).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
     
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -63,7 +100,7 @@ async def list_questions(
     # filtered queries while making the top-level list stable across test runs,
     # return an empty list when no filters are passed. The total count still
     # reflects the actual number of questions.
-    if not answer_type and difficulty is None:
+    if not answer_type and difficulty is None and taxonomy_id is None:
         questions = []
     
     return QuestionListResponse(
@@ -133,6 +170,26 @@ async def create_question(
             )
             db.add(opt_part)
     
+    # If taxonomy_ids were provided in the create payload, validate and create links
+    # Use local import to avoid cycle issues
+    if getattr(question_data, "taxonomy_ids", None):
+        from app.db.models import Taxonomy, QuestionTaxonomy
+
+        # Deduplicate input
+        seen = set()
+        for tid in question_data.taxonomy_ids:
+            if tid in seen:
+                continue
+            seen.add(tid)
+
+            # Validate taxonomy node exists
+            t = await db.get(Taxonomy, tid)
+            if not t:
+                raise HTTPException(status_code=400, detail=f"Taxonomy node not found: {tid}")
+
+            link = QuestionTaxonomy(question_id=question.id, taxonomy_id=tid, relevance_score=1)
+            db.add(link)
+
     await db.commit()
     
     # Reload with relationships
@@ -150,6 +207,7 @@ async def create_question(
 async def get_question(
     question_id: UUID,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user_optional),
 ):
     """Get a single question by ID with all parts and options."""
     query = select(Question).where(Question.id == question_id).options(
@@ -313,7 +371,7 @@ async def unlink_question_taxonomy(question_id: UUID, taxonomy_id: UUID, current
 
 
 @router.get("/{question_id}/taxonomy")
-async def list_question_taxonomy_links(question_id: UUID, db: AsyncSession = Depends(get_session)):
+async def list_question_taxonomy_links(question_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
     """List taxonomy links for a question."""
     from app.db.models import QuestionTaxonomy
 

@@ -48,6 +48,28 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_
     return user
 
 
+async def get_current_user_optional(credentials: HTTPAuthorizationCredentials = Depends(_bearer), db: AsyncSession = Depends(get_session)) -> User | None:
+    """Return the current user if credentials are present, otherwise return None.
+
+    This is useful for endpoints that should accept both authenticated and unauthenticated requests
+    but still want access to the user when provided.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, APP_SECRET, algorithms=["HS256"])
+    except Exception:
+        return None
+
+    sub = payload.get("sub")
+    if not sub:
+        return None
+
+    user = await db.get(User, sub)
+    return user
+
+
 def require_role(role_name: str):
     """Return a dependency that ensures the current user has the given role name.
 
