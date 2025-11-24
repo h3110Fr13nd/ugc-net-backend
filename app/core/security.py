@@ -14,9 +14,12 @@ from typing import Tuple
 _bearer = HTTPBearer(auto_error=False)
 
 # Refresh token lifetime (seconds)
-REFRESH_TOKEN_SECONDS = int(os.environ.get("REFRESH_TOKEN_SECONDS", 60 * 60 * 24 * 30))  # 30 days
+from app.core.config import settings
 
-APP_SECRET = os.environ.get("APP_SECRET", "dev-secret")
+# Refresh token lifetime (seconds)
+REFRESH_TOKEN_SECONDS = settings.REFRESH_TOKEN_SECONDS
+
+APP_SECRET = settings.APP_SECRET
 
 
 def hash_token(token: str) -> str:

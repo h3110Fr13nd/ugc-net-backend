@@ -9,6 +9,8 @@ from .taxonomy import router as taxonomy_router
 from .quizzes import router as quizzes_router
 from .attempts import router as attempts_router
 from .stats import router as stats_router
+from .ws_attempts import router as ws_attempts_router
+from .history import router as history_router
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -40,3 +42,9 @@ router.include_router(attempts_router)
 
 # Include stats endpoints
 router.include_router(stats_router)
+
+# Include WebSocket attempts endpoints
+router.include_router(ws_attempts_router)
+
+# Include history endpoints
+router.include_router(history_router)

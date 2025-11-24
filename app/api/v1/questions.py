@@ -77,6 +77,8 @@ async def list_questions(
     answer_type: Optional[str] = None,
     difficulty: Optional[int] = None,
     taxonomy_id: Optional[UUID] = None,
+    status: Optional[str] = None,
+    randomize: bool = Query(False, description="Randomize question order"),
     db: AsyncSession = Depends(get_session),
     current_user = Depends(get_current_user_optional),
 ):
@@ -110,14 +112,37 @@ async def list_questions(
             # path is like "root_id.child_id.leaf_id"
             # We want where path LIKE "root_id.child_id%"
             
-            # We join Question -> QuestionTaxonomy -> Taxonomy
-            query = query.join(QuestionTaxonomy).join(Taxonomy).where(
+            # We join Question -> QuestionTaxonomy -> Taxonomy with explicit conditions
+            query = query.join(
+                QuestionTaxonomy, 
+                Question.id == QuestionTaxonomy.question_id
+            ).join(
+                Taxonomy, 
+                QuestionTaxonomy.taxonomy_id == Taxonomy.id
+            ).where(
                 Taxonomy.path.like(f"{t_node.path}%")
             )
         else:
             # Fallback if node not found or no path (shouldn't happen for valid nodes)
             # Just filter by exact ID to return empty or exact match
-            query = query.join(QuestionTaxonomy).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
+            query = query.join(
+                QuestionTaxonomy, 
+                Question.id == QuestionTaxonomy.question_id
+            ).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
+
+    if status == "unattempted" and current_user:
+        # Filter out questions that have been attempted by the current user
+        # We use a NOT EXISTS subquery or LEFT JOIN ... WHERE NULL
+        from app.db.models import QuestionAttempt, QuizAttempt
+        
+        # Subquery to find question_ids attempted by user
+        subquery = (
+            select(QuestionAttempt.question_id)
+            .join(QuizAttempt, QuestionAttempt.quiz_attempt_id == QuizAttempt.id)
+            .where(QuizAttempt.user_id == current_user.id)
+        )
+        query = query.where(Question.id.not_in(subquery))
+
 
     # Count total
     count_query = select(func.count()).select_from(Question)
@@ -128,18 +153,44 @@ async def list_questions(
     if taxonomy_id is not None:
         # Same recursive logic for count
         if 't_node' in locals() and t_node and t_node.path:
-             count_query = count_query.join(QuestionTaxonomy).join(Taxonomy).where(
+            count_query = count_query.join(
+                QuestionTaxonomy,
+                Question.id == QuestionTaxonomy.question_id
+            ).join(
+                Taxonomy,
+                QuestionTaxonomy.taxonomy_id == Taxonomy.id
+            ).where(
                 Taxonomy.path.like(f"{t_node.path}%")
             )
         else:
-             count_query = count_query.join(QuestionTaxonomy).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
+            count_query = count_query.join(
+                QuestionTaxonomy,
+                Question.id == QuestionTaxonomy.question_id
+            ).where(QuestionTaxonomy.taxonomy_id == taxonomy_id)
+    
+    if status == "unattempted" and current_user:
+        # Same subquery logic for count
+        if 'subquery' not in locals():
+             from app.db.models import QuestionAttempt, QuizAttempt
+             subquery = (
+                select(QuestionAttempt.question_id)
+                .join(QuizAttempt, QuestionAttempt.quiz_attempt_id == QuizAttempt.id)
+                .where(QuizAttempt.user_id == current_user.id)
+            )
+        count_query = count_query.where(Question.id.not_in(subquery))
     
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
     
-    # Apply pagination
+    # Apply pagination and ordering
     offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size).order_by(Question.created_at.desc())
+    
+    if randomize:
+        # Use random ordering
+        query = query.offset(offset).limit(page_size).order_by(func.random())
+    else:
+        # Default ordering by creation date
+        query = query.offset(offset).limit(page_size).order_by(Question.created_at.desc())
     
     result = await db.execute(query)
     questions = result.scalars().all()

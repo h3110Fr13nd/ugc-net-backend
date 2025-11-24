@@ -221,6 +221,7 @@ class Question(Base):
     description = Column(Text, nullable=True) # Internal description or notes
     answer_type = Column(String, nullable=False, default="options") # 'options', 'text', 'numeric', 'match'
     scoring = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")) # e.g. {"points_per_part": 1}
+    explanation = Column(JSONB, nullable=True) # Rich text explanation: [{"type": "text", "content": "..."}]
     difficulty = Column(Integer, nullable=True) # e.g., 1-5
     estimated_time_seconds = Column(Integer, nullable=True)
     meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
