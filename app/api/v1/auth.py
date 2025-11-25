@@ -330,7 +330,7 @@ async def refresh(response: Response, refresh_token: str | None = Cookie(None), 
     rt = res.scalar_one_or_none()
     if not rt:
         raise HTTPException(status_code=401, detail="Refresh token not found")
-    if rt.revoked_at or (rt.expires_at and rt.expires_at < datetime.utcnow()):
+    if rt.revoked_at or (rt.expires_at and rt.expires_at < datetime.now(timezone.utc)):
         raise HTTPException(status_code=401, detail="Refresh token revoked or expired")
 
     # Load user

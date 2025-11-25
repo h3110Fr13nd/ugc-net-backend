@@ -3,7 +3,6 @@ from typing import Optional, List, Any
 from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from datetime import datetime
-from decimal import Decimal
 
 
 # Media schemas
@@ -77,7 +76,7 @@ class OptionBase(BaseModel):
     label: Optional[str] = None
     index: Optional[int] = None
     is_correct: bool = False
-    weight: Decimal = Decimal("1.0")
+    weight: float = 1.0
     meta_data: dict = Field(default_factory=dict)
 
 
@@ -89,7 +88,7 @@ class OptionUpdate(BaseModel):
     label: Optional[str] = None
     index: Optional[int] = None
     is_correct: Optional[bool] = None
-    weight: Optional[Decimal] = None
+    weight: Optional[float] = None
     meta_data: Optional[dict] = None
     parts: Optional[List[OptionPartCreate]] = None
 
@@ -135,6 +134,20 @@ class QuestionUpdate(BaseModel):
     options: Optional[List[OptionCreate]] = None
 
 
+class QuestionAttemptResponse(BaseModel):
+    id: UUID
+    quiz_attempt_id: Optional[UUID] = None
+    question_id: UUID
+    attempt_index: Optional[int] = None
+    started_at: datetime
+    submitted_at: Optional[datetime] = None
+    scored_at: Optional[datetime] = None
+    score: Optional[float] = None
+    grading: Optional[dict] = None
+    meta_data: dict
+    model_config = ConfigDict(from_attributes=True)
+
+
 class QuestionResponse(QuestionBase):
     id: UUID
     canonical_id: Optional[UUID] = None
@@ -143,6 +156,8 @@ class QuestionResponse(QuestionBase):
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    # Optional field to include the current user's latest attempt
+    user_attempt: Optional[QuestionAttemptResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -188,7 +203,7 @@ class QuestionAttemptPartCreate(BaseModel):
     question_part_id: Optional[UUID] = None
     selected_option_ids: Optional[List[UUID]] = None
     text_response: Optional[str] = None
-    numeric_response: Optional[Decimal] = None
+    numeric_response: Optional[float] = None
     file_media_id: Optional[UUID] = None
     raw_response: Optional[dict] = None
 
@@ -201,19 +216,7 @@ class QuestionAttemptCreate(BaseModel):
     meta_data: dict = Field(default_factory=dict)
 
 
-class QuestionAttemptResponse(BaseModel):
-    id: UUID
-    quiz_attempt_id: Optional[UUID] = None
-    question_id: UUID
-    attempt_index: Optional[int] = None
-    started_at: datetime
-    submitted_at: Optional[datetime] = None
-    scored_at: Optional[datetime] = None
-    score: Optional[Decimal] = None
-    grading: Optional[dict] = None
-    meta_data: dict
 
-    model_config = ConfigDict(from_attributes=True)
 
 
 class QuizAttemptCreate(BaseModel):
@@ -229,8 +232,8 @@ class QuizAttemptResponse(BaseModel):
     started_at: datetime
     submitted_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
-    score: Optional[Decimal] = None
-    max_score: Optional[Decimal] = None
+    score: Optional[float] = None
+    max_score: Optional[float] = None
     status: str
     meta_data: dict
 
@@ -261,6 +264,9 @@ class TaxonomyResponse(TaxonomyBase):
 
 class TaxonomyTreeResponse(TaxonomyResponse):
     children: List["TaxonomyTreeResponse"] = Field(default_factory=list)
+    questions_attempted: int = 0
+    questions_correct: int = 0
+    average_score_percent: float = 0.0
 
 
 # Forward ref resolution

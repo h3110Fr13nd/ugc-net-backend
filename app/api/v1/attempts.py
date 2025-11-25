@@ -300,64 +300,8 @@ async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: As
 
     # Statistics engine: update UserTaxonomyStats for user if available
     if qa.user_id:
-        # gather taxonomy nodes for this question
-        qlinks = (await db.execute(select(QuestionTaxonomy).where(QuestionTaxonomy.question_id == question.id))).scalars().all()
-        taxonomy_ids = [ql.taxonomy_id for ql in qlinks]
-
-        # For each taxonomy node, walk up parents and upsert stats
-        for tid in taxonomy_ids:
-            node = await db.get(Taxonomy, tid)
-            ancestors = []
-            cur = node
-            while cur:
-                ancestors.append(cur)
-                if cur.parent_id:
-                    cur = await db.get(Taxonomy, cur.parent_id)
-                else:
-                    break
-
-            for anc in ancestors:
-                # Coerce to UUID objects so we store/query using the correct types.
-                try:
-                    user_key = qa.user_id if isinstance(qa.user_id, uuid.UUID) else uuid.UUID(str(qa.user_id))
-                except Exception:
-                    user_key = qa.user_id
-
-                try:
-                    tax_key = anc.id if isinstance(anc.id, uuid.UUID) else uuid.UUID(str(anc.id))
-                except Exception:
-                    tax_key = anc.id
-
-                # Try to fetch existing stats
-                existing = (await db.execute(select(UserTaxonomyStats).where(UserTaxonomyStats.user_id == user_key, UserTaxonomyStats.taxonomy_id == tax_key))).scalar_one_or_none()
-                if existing:
-                    existing.questions_attempted = (existing.questions_attempted or 0) + 1
-                    # do Decimal arithmetic to avoid mixing Decimal and float
-                    existing_total = Decimal(str(existing.total_score or 0))
-                    existing_max = Decimal(str(existing.max_possible_score or 0))
-                    new_total = existing_total + score
-                    new_max = existing_max + max_score
-                    existing.total_score = float(new_total)
-                    existing.max_possible_score = float(new_max)
-                    if score == max_score and max_score > 0:
-                        existing.questions_correct = (existing.questions_correct or 0) + 1
-                    # recompute average (store as float percent)
-                    try:
-                        existing.average_score_percent = (float(new_total) / float(new_max) * 100) if new_max else 0
-                    except Exception:
-                        existing.average_score_percent = 0
-                else:
-                    uts = UserTaxonomyStats(
-                        user_id=user_key,
-                        taxonomy_id=tax_key,
-                        questions_attempted=1,
-                        questions_correct=1 if (score == max_score and max_score > 0) else 0,
-                        total_score=float(score),
-                        max_possible_score=float(max_score),
-                        average_score_percent=(float(score) / float(max_score) * 100) if max_score and max_score > 0 else 0,
-                        meta_data={},
-                    )
-                    db.add(uts)
+        from app.services.stats_service import update_user_taxonomy_stats
+        await update_user_taxonomy_stats(db, qa.user_id, question.id, score, max_score)
 
     await db.commit()
     await db.refresh(q_attempt)

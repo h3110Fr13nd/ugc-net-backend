@@ -314,7 +314,7 @@ class OptionPart(Base):
 class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
-    quiz_id = Column(UUID(as_uuid=True), ForeignKey("quizzes.id"), nullable=False, index=True)
+    quiz_id = Column(UUID(as_uuid=True), ForeignKey("quizzes.id"), nullable=True, index=True)
     # Link the attempt to the QuizVersion that was used for this attempt (nullable for older attempts)
     quiz_version_id = Column(UUID(as_uuid=True), ForeignKey("quiz_versions.id"), nullable=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)

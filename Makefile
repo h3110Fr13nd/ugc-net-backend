@@ -48,3 +48,27 @@ logs:
 
 shell:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) exec web /bin/bash
+
+# Remote Sync Configuration
+VM_USER=azureuser
+VM_HOST=20.244.35.24
+KEY_PATH=/home/h3110fr13nd/Downloads/SECURE/Credentials/ugc-net_key (1).pem
+REMOTE_DIR=/home/azureuser/ugc-net-backend
+REMOTE_DB_CONTAINER=db
+
+.PHONY: sync-db
+sync-db:
+	@echo "Syncing database from remote ($(VM_HOST))..."
+	@echo "Step 1: Dumping remote database..."
+	@ssh -i "$(KEY_PATH)" -o StrictHostKeyChecking=no $(VM_USER)@$(VM_HOST) "cd $(REMOTE_DIR) && docker compose up -d $(REMOTE_DB_CONTAINER) && sleep 5 && docker compose exec -T $(REMOTE_DB_CONTAINER) pg_dump -U postgres ugc" > remote_dump.sql
+	@echo "Step 2: Stopping web service to release DB locks..."
+	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) stop web
+	@echo "Step 3: Recreating local database..."
+	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) exec -T db psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS ugc"
+	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) exec -T db psql -U postgres -d postgres -c "CREATE DATABASE ugc"
+	@echo "Step 4: Restoring dump to local database..."
+	@cat remote_dump.sql | $(DOCKER_COMPOSE) -f $(COMPOSE_FILE) exec -T db psql -U postgres -d ugc
+	@rm remote_dump.sql
+	@echo "Step 5: Restarting web service..."
+	@$(DOCKER_COMPOSE) -f $(COMPOSE_FILE) start web
+	@echo "Sync complete! Local database is now up to date with remote."

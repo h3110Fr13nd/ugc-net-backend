@@ -30,9 +30,11 @@ error() {
 
 # Parse arguments
 MIGRATE_DB=false
+INCLUDE_UPLOADS=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --migrate-db) MIGRATE_DB=true ;;
+        --include-uploads) INCLUDE_UPLOADS=true ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
@@ -70,22 +72,26 @@ ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$VM_USER@$VM_HOST" << EOF
     fi
 EOF
 
+set -e
+
 # 3. Code Sync
 log "Syncing code to $VM_HOST..."
 # Ensure remote directory exists
 ssh -i "$KEY_PATH" "$VM_USER@$VM_HOST" "mkdir -p $REMOTE_DIR"
 
+# Ensure remote uploads dir exists and is owned by the deployment user to prevent rsync mkstemp permission errors
+ssh -i "$KEY_PATH" "$VM_USER@$VM_HOST" "sudo mkdir -p $REMOTE_DIR/uploads && sudo chown -R $VM_USER:$VM_USER $REMOTE_DIR/uploads && sudo chmod -R 755 $REMOTE_DIR/uploads || true"
+
 # Sync files
-rsync -avz -e "ssh -i '$KEY_PATH'" \
-    --exclude '.git' \
-    --exclude '.venv' \
-    --exclude '__pycache__' \
-    --exclude 'logs' \
-    --exclude 'uploads' \
-    --exclude 'pgdata' \
-    --exclude 'pgadmin-data' \
-    --exclude 'grafana-data' \
-    ./ "$VM_USER@$VM_HOST:$REMOTE_DIR"
+RSYNC_EXCLUDES=(--exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude 'logs' --exclude 'pgdata' --exclude 'pgadmin-data' --exclude 'grafana-data')
+if [ "$INCLUDE_UPLOADS" = false ]; then
+    RSYNC_EXCLUDES+=(--exclude 'uploads')
+fi
+
+rsync -avz -e "ssh -i '$KEY_PATH'" "${RSYNC_EXCLUDES[@]}" ./ "$VM_USER@$VM_HOST:$REMOTE_DIR"
+if [ $? -ne 0 ]; then
+    error "rsync of code to VM failed"
+fi
 
 # 4. Environment Setup
 log "Setting up environment variables..."
@@ -112,6 +118,22 @@ if [ "$MIGRATE_DB" = true ]; then
     log "Transferring dump to VM..."
     scp -i "$KEY_PATH" dump.sql "$VM_USER@$VM_HOST:$REMOTE_DIR/dump.sql"
     rm dump.sql # Clean up local dump
+
+    # If asked, transfer uploads as well
+    if [ "$INCLUDE_UPLOADS" = true ]; then
+        log "Preparing remote uploads dir and permissions..."
+        ssh -i "$KEY_PATH" "$VM_USER@$VM_HOST" "sudo mkdir -p $REMOTE_DIR/uploads && sudo chown -R $VM_USER:$VM_USER $REMOTE_DIR/uploads && sudo chmod -R 755 $REMOTE_DIR/uploads || true"
+
+        log "Transferring uploads/ to VM..."
+        # Ensure copied files are readable/writable by owner and readable by others
+        rsync -avz --chmod=ugo=rwX -e "ssh -i '$KEY_PATH'" uploads/ "$VM_USER@$VM_HOST:$REMOTE_DIR/uploads/"
+        if [ $? -ne 0 ]; then
+            error "rsync of uploads to VM failed"
+        fi
+
+        # Ensure remote uploads are owned by deployment user (fix for cases when docker or root created files)
+        ssh -i "$KEY_PATH" "$VM_USER@$VM_HOST" "sudo chown -R $VM_USER:$VM_USER $REMOTE_DIR/uploads && sudo chmod -R 755 $REMOTE_DIR/uploads || true"
+    fi
     
     # Restore on VM (safe restore: backup remote DB, stop web, drop/create DB and restore)
     log "Restoring database on VM..."
