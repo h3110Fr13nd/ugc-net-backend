@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 import uuid
 from decimal import Decimal
@@ -49,6 +50,7 @@ from app.db.models import (
     QuestionAttemptPart,
     Quiz,
     Question,
+    QuestionPart,
     Option,
     QuestionTaxonomy,
     Taxonomy,
@@ -58,13 +60,13 @@ from app.db.models import (
     UserRole,
 )
 from .schemas import QuizAttemptCreate, QuizAttemptResponse, QuestionAttemptCreate, QuestionAttemptResponse
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user_optional, get_current_user
 
 router = APIRouter(tags=["attempts"])
 
 
 @router.post("/quizzes/{quiz_id}/start", response_model=QuizAttemptResponse, status_code=201)
-async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Optional[UUID] = None, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Optional[UUID] = None, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     """Start a quiz attempt.
 
     If `version_id` is provided, use that QuizVersion. Otherwise resolve the latest published QuizVersion for the quiz.
@@ -95,7 +97,7 @@ async def start_quiz(quiz_id: UUID, payload: QuizAttemptCreate, version_id: Opti
 
 
 @router.post("/quiz-attempts/{attempt_id}/submit-answer", response_model=QuestionAttemptResponse)
-async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     # Fetch quiz attempt
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
@@ -309,7 +311,7 @@ async def submit_answer(attempt_id: UUID, payload: QuestionAttemptCreate, db: As
 
 
 @router.post("/quiz-attempts/{attempt_id}/finish")
-async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     """Mark a quiz attempt as finished, compute final totals and mark completed."""
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
@@ -355,7 +357,7 @@ async def finish_quiz(attempt_id: UUID, db: AsyncSession = Depends(get_session),
 
 
 @router.get("/quiz-attempts/{attempt_id}/results")
-async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     """Return the full graded review of a completed quiz attempt."""
     qa = await db.get(QuizAttempt, attempt_id)
     if not qa:
@@ -375,8 +377,16 @@ async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_sess
             except Exception:
                 raise HTTPException(status_code=403, detail="forbidden")
 
-    # Load question attempts and parts
-    res = await db.execute(select(QuestionAttempt).where(QuestionAttempt.quiz_attempt_id == qa.id))
+    # Load question attempts and parts with question details
+    res = await db.execute(
+        select(QuestionAttempt)
+        .where(QuestionAttempt.quiz_attempt_id == qa.id)
+        .options(
+            selectinload(QuestionAttempt.question).selectinload(Question.options).selectinload(Option.parts),
+            selectinload(QuestionAttempt.question).selectinload(Question.parts).selectinload(QuestionPart.media),
+            selectinload(QuestionAttempt.parts)
+        )
+    )
     qattempts = res.scalars().all()
 
     out = {
@@ -391,12 +401,61 @@ async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_sess
     }
 
     for q in qattempts:
-        # load parts
-        parts_res = await db.execute(select(QuestionAttemptPart).where(QuestionAttemptPart.question_attempt_id == q.id))
-        parts = parts_res.scalars().all()
+        # parts are already loaded via selectinload
+        parts = q.parts
+        
+        # Format options if available
+        options_data = []
+        if q.question.options:
+            for opt in q.question.options:
+                options_data.append({
+                    "id": str(opt.id),
+                    "label": opt.label,
+                    "is_correct": opt.is_correct,
+                    "weight": float(opt.weight or 1),
+                })
+
         out["questions"].append({
             "id": str(q.id),
             "question_id": str(q.question_id),
+            "question_title": q.question.title,
+            "question_description": q.question.description,
+            "question_explanation": q.question.explanation,
+            "question_answer_type": q.question.answer_type,
+            "question_parts": [{
+                "id": str(p.id),
+                "index": p.index,
+                "part_type": p.part_type,
+                "content": p.content,
+                "content_json": p.content_json,
+                "media_id": str(p.media_id) if p.media_id else None,
+                "media": {
+                    "id": str(p.media.id),
+                    "url": p.media.url,
+                    "storage_key": p.media.storage_key,
+                    "mime_type": p.media.mime_type,
+                    "width": p.media.width,
+                    "height": p.media.height,
+                    "size_bytes": p.media.size_bytes,
+                    "checksum": p.media.checksum,
+                    "meta_data": p.media.meta_data,
+                    "created_at": p.media.created_at.isoformat(),
+                    "updated_at": p.media.updated_at.isoformat(),
+                } if p.media else None,
+                "meta_data": p.meta_data,
+            } for p in q.question.parts],
+            "options": [{
+                "id": str(opt.id),
+                "label": opt.label,
+                "is_correct": opt.is_correct,
+                "weight": float(opt.weight or 1),
+                "parts": [{
+                    "index": op.index,
+                    "part_type": op.part_type,
+                    "content": op.content,
+                    "media_id": str(op.media_id) if op.media_id else None,
+                } for op in opt.parts]
+            } for opt in q.question.options],
             "score": float(q.score or 0),
             "max_score": float(q.max_score or 0),
             "parts": [{
@@ -410,3 +469,23 @@ async def get_quiz_results(attempt_id: UUID, db: AsyncSession = Depends(get_sess
         })
 
     return out
+
+
+@router.get("/quiz-attempts/history", response_model=List[QuizAttemptResponse])
+async def get_attempt_history(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user)
+):
+    """List past quiz attempts for the current user."""
+    stmt = (
+        select(QuizAttempt)
+        .where(QuizAttempt.user_id == current_user.id)
+        .order_by(QuizAttempt.started_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    res = await db.execute(stmt)
+    attempts = res.scalars().all()
+    return attempts

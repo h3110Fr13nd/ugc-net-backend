@@ -107,6 +107,7 @@ class OptionResponse(OptionBase):
 class QuestionBase(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    explanation: Optional[Any] = None
     answer_type: str = "options"  # 'options', 'text', 'numeric', 'integer', 'regex', 'file', 'composite'
     scoring: dict = Field(default_factory=dict)
     difficulty: Optional[int] = None
@@ -143,6 +144,8 @@ class QuestionAttemptResponse(BaseModel):
     submitted_at: Optional[datetime] = None
     scored_at: Optional[datetime] = None
     score: Optional[float] = None
+    duration_seconds: Optional[int] = None
+    status: Optional[str] = None
     grading: Optional[dict] = None
     meta_data: dict
     model_config = ConfigDict(from_attributes=True)
@@ -213,6 +216,8 @@ class QuestionAttemptCreate(BaseModel):
     quiz_attempt_id: Optional[UUID] = None
     attempt_index: Optional[int] = None
     parts: List[QuestionAttemptPartCreate] = Field(default_factory=list)
+    duration_seconds: Optional[int] = None
+    status: Optional[str] = "attempted"
     meta_data: dict = Field(default_factory=dict)
 
 
@@ -227,7 +232,7 @@ class QuizAttemptCreate(BaseModel):
 
 class QuizAttemptResponse(BaseModel):
     id: UUID
-    quiz_id: UUID
+    quiz_id: Optional[UUID] = None
     user_id: Optional[UUID] = None
     started_at: datetime
     submitted_at: Optional[datetime] = None
@@ -250,7 +255,7 @@ class TaxonomyBase(BaseModel):
 
 
 class TaxonomyCreate(TaxonomyBase):
-    pass
+    related_node_ids: Optional[List[UUID]] = None
 
 
 class TaxonomyResponse(TaxonomyBase):
@@ -258,6 +263,7 @@ class TaxonomyResponse(TaxonomyBase):
     path: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    related_nodes: List["TaxonomyResponse"] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -266,8 +272,12 @@ class TaxonomyTreeResponse(TaxonomyResponse):
     children: List["TaxonomyTreeResponse"] = Field(default_factory=list)
     questions_attempted: int = 0
     questions_correct: int = 0
+    questions_viewed: int = 0
+    total_time_seconds: int = 0
     average_score_percent: float = 0.0
+    last_attempt_at: datetime | None = None
 
 
 # Forward ref resolution
+TaxonomyResponse.model_rebuild()
 TaxonomyTreeResponse.model_rebuild()

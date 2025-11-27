@@ -57,6 +57,8 @@ async def save_question_attempt(
     max_score: float = 1.0,
     grading_details: dict | None = None,
     attempt_index: int = 1,
+    duration_seconds: int | None = None,
+    status: str = "attempted",
 ) -> QuestionAttempt:
     """
     Save a question attempt and its parts to the database.
@@ -83,6 +85,8 @@ async def save_question_attempt(
         score=Decimal(str(score)) if score is not None else None,
         max_score=Decimal(str(max_score)),
         grading=grading_details or {},
+        duration_seconds=duration_seconds,
+        status=status,
         meta_data={},
     )
     db.add(question_attempt)
@@ -137,6 +141,7 @@ async def update_attempt_stats(
     is_correct: bool,
     score: float,
     max_score: float,
+    time_spent: int = 0,
 ) -> None:
     """
     Update UserTaxonomyStats after a question is answered.
@@ -151,4 +156,5 @@ async def update_attempt_stats(
         question_id=question_id,
         score=score_decimal,
         max_score=max_score_decimal,
+        time_spent=time_spent,
     )

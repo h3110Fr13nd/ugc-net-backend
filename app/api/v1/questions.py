@@ -18,7 +18,7 @@ from app.api.v1.schemas import (
     QuestionAttemptCreate,
 )
 from app.core.security import require_role
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user_optional, get_current_user
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 
@@ -84,7 +84,7 @@ async def list_questions(
     include_user_attempt: bool = Query(False, description="Include the current user's latest attempt"),
     randomize: bool = Query(False, description="Randomize question order"),
     db: AsyncSession = Depends(get_session),
-    current_user = Depends(get_current_user_optional),
+    current_user = Depends(get_current_user),
 ):
     """List questions with pagination and optional filters."""
     # Import here to avoid circular imports and ensure availability throughout function
@@ -367,7 +367,7 @@ async def create_question(
 async def get_question(
     question_id: UUID,
     db: AsyncSession = Depends(get_session),
-    current_user = Depends(get_current_user_optional),
+    current_user = Depends(get_current_user),
 ):
     """Get a single question by ID with all parts and options."""
     query = select(Question).where(Question.id == question_id).options(
@@ -531,7 +531,7 @@ async def unlink_question_taxonomy(question_id: UUID, taxonomy_id: UUID, current
 
 
 @router.get("/{question_id}/taxonomy")
-async def list_question_taxonomy_links(question_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def list_question_taxonomy_links(question_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     """List taxonomy links for a question."""
     from app.db.models import QuestionTaxonomy
 
@@ -570,14 +570,13 @@ async def submit_question_attempt(
     question_id: UUID,
     payload: QuestionAttemptCreate,
     db: AsyncSession = Depends(get_session),
-    current_user = Depends(get_current_user_optional)
+    current_user = Depends(get_current_user)
 ):
     """
     Submit an attempt for a single question (standalone mode).
     Creates a 'standalone' QuizAttempt wrapper implicitly.
     """
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required for tracking progress")
+
 
     # Verify question exists
     question = await db.get(Question, question_id)
@@ -642,6 +641,8 @@ async def submit_question_attempt(
         meta_data=payload.meta_data,
         score=score,
         max_score=max_score,
+        duration_seconds=payload.duration_seconds,
+        status="attempted",
         scored_at=func.now()
     )
     db.add(q_attempt)
@@ -662,8 +663,97 @@ async def submit_question_attempt(
 
     # Update User Stats
     from app.services.stats_service import update_user_taxonomy_stats
-    await update_user_taxonomy_stats(db, current_user.id, question.id, score, max_score)
+    await update_user_taxonomy_stats(
+        db, 
+        current_user.id, 
+        question.id, 
+        score, 
+        max_score, 
+        time_spent=payload.duration_seconds or 0
+    )
 
     await db.commit()
     await db.refresh(q_attempt)
     return q_attempt
+
+
+@router.post("/{question_id}/view", status_code=204)
+async def record_question_view(
+    question_id: UUID,
+    duration_seconds: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user)
+):
+    """Record a view of a question (without attempting)."""
+    # Verify question exists
+    question = await db.get(Question, question_id)
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    # Create a "standalone" QuizAttempt wrapper for the view
+    qa = QuizAttempt(
+        quiz_id=None,
+        user_id=current_user.id,
+        status="completed"
+    )
+    db.add(qa)
+    await db.flush()
+    
+    q_attempt = QuestionAttempt(
+        quiz_attempt_id=qa.id,
+        question_id=question.id,
+        attempt_index=None,
+        score=None,
+        max_score=None,
+        duration_seconds=duration_seconds,
+        status="viewed",
+        scored_at=None
+    )
+    db.add(q_attempt)
+
+    # Update stats
+    from app.services.stats_service import update_user_taxonomy_stats
+    await update_user_taxonomy_stats(
+        db, 
+        current_user.id, 
+        question.id, 
+        Decimal(0), 
+        Decimal(0), 
+        time_spent=duration_seconds, 
+        is_view_only=True
+    )
+    
+    await db.commit()
+    return None
+
+
+@router.get("/{question_id}/attempts", response_model=List[QuestionAttemptResponse])
+async def list_question_attempts(
+    question_id: UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user)
+):
+    """List all attempts for a specific question by the current user."""
+    # Verify question exists
+    question = await db.get(Question, question_id)
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    # Fetch attempts
+    # We need to join with QuizAttempt to filter by user_id
+    stmt = (
+        select(QuestionAttempt)
+        .join(QuizAttempt, QuestionAttempt.quiz_attempt_id == QuizAttempt.id)
+        .where(
+            QuestionAttempt.question_id == question_id,
+            QuizAttempt.user_id == current_user.id
+        )
+        .order_by(QuestionAttempt.started_at.desc())
+        .options(
+            selectinload(QuestionAttempt.parts)
+        )
+    )
+    
+    result = await db.execute(stmt)
+    attempts = result.scalars().all()
+    return attempts

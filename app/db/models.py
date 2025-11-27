@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import declarative_base, relationship, remote, foreign
 import sqlalchemy as sa
+from sqlalchemy import Table
 from datetime import datetime, timezone
 
 Base = declarative_base()
@@ -154,6 +155,15 @@ class Media(Base):
     uploader = relationship("User")
 
 # --- NEW/MODIFIED TAXONOMY SECTION ---
+
+# Association table for Taxonomy self-referencing many-to-many
+taxonomy_related_nodes = Table(
+    'taxonomy_related_nodes',
+    Base.metadata,
+    Column('source_id', UUID(as_uuid=True), ForeignKey('taxonomy.id'), primary_key=True),
+    Column('target_id', UUID(as_uuid=True), ForeignKey('taxonomy.id'), primary_key=True)
+)
+
 # This single table replaces Subject, Chapter, and Topic.
 class Taxonomy(Base):
     __tablename__ = "taxonomy"
@@ -174,7 +184,17 @@ class Taxonomy(Base):
     children = relationship("Taxonomy", back_populates="parent", cascade="all, delete-orphan")
     
     question_links = relationship("QuestionTaxonomy", back_populates="taxonomy_node")
+    question_links = relationship("QuestionTaxonomy", back_populates="taxonomy_node")
     user_stats = relationship("UserTaxonomyStats", back_populates="taxonomy_node")
+
+    # Many-to-many relationship for related nodes
+    related_nodes = relationship(
+        "Taxonomy",
+        secondary=taxonomy_related_nodes,
+        primaryjoin=id==taxonomy_related_nodes.c.source_id,
+        secondaryjoin=id==taxonomy_related_nodes.c.target_id,
+        backref="related_to"
+    )
 
 
 # --- QUIZ & QUESTION SECTION ---
@@ -346,6 +366,8 @@ class QuestionAttempt(Base):
     scored_at = Column(DateTime(timezone=True), nullable=True)
     score = Column(Numeric, nullable=True)
     max_score = Column(Numeric, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    status = Column(String, nullable=False, default="attempted") # 'attempted', 'viewed', 'skipped'
     grading = Column(JSONB, nullable=True) # Store details of the grading (e.g., which parts were right/wrong)
     meta_data = Column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
 
@@ -382,6 +404,8 @@ class UserTaxonomyStats(Base):
     
     questions_attempted = Column(Integer, nullable=False, default=0)
     questions_correct = Column(Integer, nullable=False, default=0)
+    questions_viewed = Column(Integer, nullable=False, default=0)
+    total_time_seconds = Column(Integer, nullable=False, default=0)
     total_score = Column(Numeric, nullable=False, default=0)
     max_possible_score = Column(Numeric, nullable=False, default=0)
     # Store derived value for easy reads. Can be updated via trigger or application logic.

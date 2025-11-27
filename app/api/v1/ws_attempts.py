@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import Literal
 from decimal import Decimal
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -24,6 +24,8 @@ from app.services.attempt_service import (
     update_attempt_stats,
     create_or_get_quiz_attempt,
 )
+from app.core.security import get_current_user, APP_SECRET
+import jwt
 
 router = APIRouter(tags=["ws_attempts"])
 
@@ -31,7 +33,7 @@ router = APIRouter(tags=["ws_attempts"])
 class CreateQuizAttemptRequest(BaseModel):
     """Request to create a new quiz attempt."""
     quiz_id: UUID | None = Field(None, description="Optional ID of the quiz. If None, creates standalone attempt for random questions")
-    user_id: UUID = Field(description="ID of the user")
+    user_id: UUID | None = Field(None, description="Optional ID of the user (ignored if authenticated)")
     quiz_version_id: UUID | None = Field(None, description="Optional quiz version ID")
 
 class CreateQuizAttemptResponse(BaseModel):
@@ -56,6 +58,7 @@ class ScoringResponse(BaseModel):
 async def create_quiz_attempt(
     request: CreateQuizAttemptRequest,
     db: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user),
 ):
     """
     Create a new quiz attempt.
@@ -86,7 +89,7 @@ async def create_quiz_attempt(
         attempt = await create_or_get_quiz_attempt(
             db=db,
             quiz_id=request.quiz_id,
-            user_id=request.user_id,
+            user_id=current_user.id,
             quiz_version_id=request.quiz_version_id,
         )
         
@@ -94,7 +97,7 @@ async def create_quiz_attempt(
         await db.commit()
         
         quiz_mode = "quiz" if request.quiz_id else "standalone"
-        print(f"✓ Created {quiz_mode} attempt {attempt.id} for user {request.user_id}")
+        print(f"✓ Created {quiz_mode} attempt {attempt.id} for user {current_user.id}")
         
         return CreateQuizAttemptResponse(
             id=attempt.id,
@@ -119,8 +122,23 @@ async def stream_answer(
     websocket: WebSocket,
     attempt_id: UUID,
     question_id: UUID,
+    token: str = Query(...),
 ):
     print(f"WS: Connection request for attempt={attempt_id}, question={question_id}")
+    
+    # Authenticate WebSocket connection
+    try:
+        payload = jwt.decode(token, APP_SECRET, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            print("WS: Invalid token payload")
+            await websocket.close(code=4003, reason="Invalid token payload")
+            return
+    except Exception as e:
+        print(f"WS: Authentication failed: {e}")
+        await websocket.close(code=4003, reason="Authentication failed")
+        return
+
     await websocket.accept()
     print("WS: Connection accepted")
     
@@ -372,6 +390,12 @@ async def stream_answer(
                                         "raw_response": part.get('raw_response'),
                                     })
                             
+                            duration_seconds = payload.get('duration_seconds', 0)
+                            try:
+                                duration_seconds = int(duration_seconds)
+                            except (ValueError, TypeError):
+                                duration_seconds = 0
+                            
                             # Save the question attempt with grading details
                             question_attempt = await save_question_attempt(
                                 db=db,
@@ -385,6 +409,8 @@ async def stream_answer(
                                     "score": final_score,
                                 },
                                 attempt_index=payload.get('attempt_index', 1),
+                                duration_seconds=duration_seconds,
+                                status="attempted",
                             )
                             
                             # Update user taxonomy statistics
@@ -404,6 +430,7 @@ async def stream_answer(
                                     is_correct=is_correct,
                                     score=final_score,
                                     max_score=1.0,
+                                    time_spent=duration_seconds,
                                 )
                             
                             # Commit changes

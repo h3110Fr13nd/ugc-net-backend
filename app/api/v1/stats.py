@@ -32,13 +32,16 @@ def build_annotated_tree(nodes: List[Taxonomy], stats_map: Dict[str, dict]) -> L
             children=[],
             questions_attempted=int(stat.get("questions_attempted", 0)),
             questions_correct=int(stat.get("questions_correct", 0)),
+            questions_viewed=int(stat.get("questions_viewed", 0)),
+            total_time_seconds=int(stat.get("total_time_seconds", 0)),
             average_score_percent=float(stat.get("average_score_percent", 0)),
+            last_attempt_at=stat.get("last_attempt_at"),
         )
 
     # Build tree structure
     roots = []
     for nid, node in by_id.items():
-        pid = node.parent_id
+        pid = str(node.parent_id) if node.parent_id else None
         if pid and pid in by_id:
             by_id[pid].children.append(node)
         else:
@@ -60,7 +63,10 @@ async def get_my_taxonomy_tree(current_user=Depends(get_current_user), db: Async
         str(s.taxonomy_id): {
             "questions_attempted": s.questions_attempted,
             "questions_correct": s.questions_correct,
-            "average_score_percent": float(s.average_score_percent or 0)
+            "questions_viewed": s.questions_viewed,
+            "total_time_seconds": s.total_time_seconds,
+            "average_score_percent": float(s.average_score_percent or 0),
+            "last_attempt_at": s.last_attempt_at,
         } for s in stats
     }
 

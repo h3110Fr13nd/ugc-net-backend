@@ -2,6 +2,7 @@ from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from app.db.base import get_session
@@ -12,7 +13,7 @@ from .schemas import (
     TaxonomyTreeResponse,
 )
 from app.core.security import require_role
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user_optional, get_current_user
 
 router = APIRouter(prefix="/taxonomy", tags=["taxonomy"])
 
@@ -27,6 +28,11 @@ async def create_taxonomy(payload: TaxonomyCreate, current_user = Depends(requir
         meta_data=payload.meta_data,
     )
     db.add(node)
+    
+    if payload.related_node_ids:
+        result = await db.execute(select(Taxonomy).where(Taxonomy.id.in_(payload.related_node_ids)))
+        node.related_nodes = result.scalars().all()
+
     await db.flush()
 
     # Set materialized path after id is available
@@ -76,7 +82,7 @@ def build_tree(nodes: List[Taxonomy]) -> List[Dict]:
 
 
 @router.get("/tree", response_model=List[TaxonomyTreeResponse])
-async def get_taxonomy_tree(db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
+async def get_taxonomy_tree(db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
     result = await db.execute(select(Taxonomy).order_by(Taxonomy.name))
     nodes = result.scalars().all()
     tree = build_tree(nodes)
@@ -84,8 +90,9 @@ async def get_taxonomy_tree(db: AsyncSession = Depends(get_session), current_use
 
 
 @router.get("/{node_id}", response_model=TaxonomyResponse)
-async def get_taxonomy_node(node_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user_optional)):
-    node = await db.get(Taxonomy, node_id)
+async def get_taxonomy_node(node_id: UUID, db: AsyncSession = Depends(get_session), current_user = Depends(get_current_user)):
+    result = await db.execute(select(Taxonomy).options(selectinload(Taxonomy.related_nodes)).where(Taxonomy.id == node_id))
+    node = result.scalars().first()
     if not node:
         raise HTTPException(status_code=404, detail="Taxonomy node not found")
     return node
@@ -101,6 +108,11 @@ async def update_taxonomy_node(node_id: UUID, payload: TaxonomyCreate, current_u
     node.description = payload.description
     node.node_type = payload.node_type
     node.meta_data = payload.meta_data
+    
+    if payload.related_node_ids is not None:
+        result = await db.execute(select(Taxonomy).where(Taxonomy.id.in_(payload.related_node_ids)))
+        node.related_nodes = result.scalars().all()
+        
     await db.commit()
     await db.refresh(node)
     return node

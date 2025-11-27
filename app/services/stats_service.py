@@ -3,6 +3,7 @@ from sqlalchemy import select
 from decimal import Decimal
 from uuid import UUID
 import uuid
+from datetime import datetime, timezone
 
 from app.db.models import (
     UserTaxonomyStats,
@@ -17,7 +18,9 @@ async def update_user_taxonomy_stats(
     user_id: UUID,
     question_id: UUID,
     score: Decimal,
-    max_score: Decimal
+    max_score: Decimal,
+    time_spent: int = 0,
+    is_view_only: bool = False
 ):
     """
     Update UserTaxonomyStats for a given user and question attempt.
@@ -63,37 +66,50 @@ async def update_user_taxonomy_stats(
             existing = (await db.execute(stmt)).scalar_one_or_none()
             
             if existing:
-                existing.questions_attempted = (existing.questions_attempted or 0) + 1
-                
-                existing_total = Decimal(str(existing.total_score or 0))
-                existing_max = Decimal(str(existing.max_possible_score or 0))
-                
-                new_total = existing_total + score
-                new_max = existing_max + max_score
-                
-                existing.total_score = float(new_total)
-                existing.max_possible_score = float(new_max)
-                
-                if score == max_score and max_score > 0:
-                    existing.questions_correct = (existing.questions_correct or 0) + 1
-                
-                # Recompute average
-                try:
-                    if new_max > 0:
-                        existing.average_score_percent = (float(new_total) / float(new_max) * 100)
-                    else:
+                existing.questions_viewed = (existing.questions_viewed or 0) + 1
+                existing.total_time_seconds = (existing.total_time_seconds or 0) + time_spent
+
+                if not is_view_only:
+                    existing.questions_attempted = (existing.questions_attempted or 0) + 1
+                    
+                    existing_total = Decimal(str(existing.total_score or 0))
+                    existing_max = Decimal(str(existing.max_possible_score or 0))
+                    
+                    new_total = existing_total + score
+                    new_max = existing_max + max_score
+                    
+                    existing.total_score = float(new_total)
+                    existing.max_possible_score = float(new_max)
+                    
+                    if score == max_score and max_score > 0:
+                        existing.questions_correct = (existing.questions_correct or 0) + 1
+                    
+                    # Recompute average
+                    try:
+                        if new_max > 0:
+                            existing.average_score_percent = (float(new_total) / float(new_max) * 100)
+                        else:
+                            existing.average_score_percent = 0
+                    except Exception:
                         existing.average_score_percent = 0
-                except Exception:
-                    existing.average_score_percent = 0
+                    
+                    # Update last_attempt_at on attempt
+                    existing.last_attempt_at = datetime.now(timezone.utc)
+                else:
+                    # On view only, try to preserve last_attempt_at to avoid onupdate=now trigger
+                    # (Though if onupdate is server-side, this might not help, but for SQLAlchemy onupdate it should)
+                    pass
             else:
                 uts = UserTaxonomyStats(
                     user_id=user_key,
                     taxonomy_id=tax_key,
-                    questions_attempted=1,
-                    questions_correct=1 if (score == max_score and max_score > 0) else 0,
-                    total_score=float(score),
-                    max_possible_score=float(max_score),
-                    average_score_percent=(float(score) / float(max_score) * 100) if max_score and max_score > 0 else 0,
+                    questions_viewed=1,
+                    total_time_seconds=time_spent,
+                    questions_attempted=1 if not is_view_only else 0,
+                    questions_correct=1 if (not is_view_only and score == max_score and max_score > 0) else 0,
+                    total_score=float(score) if not is_view_only else 0,
+                    max_possible_score=float(max_score) if not is_view_only else 0,
+                    average_score_percent=(float(score) / float(max_score) * 100) if (not is_view_only and max_score and max_score > 0) else 0,
                     meta_data={},
                 )
                 db.add(uts)
